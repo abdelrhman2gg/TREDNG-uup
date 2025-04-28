@@ -1,0 +1,58 @@
+import time
+import requests
+import json
+import datetime
+
+# إعدادات تليجرام
+TELEGRAM_TOKEN = '7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik'  # توكن البوت الخاص بك
+CHAT_ID = '5316104346'  # الـ ID الخاص بك في التليجرام
+
+# إعدادات بينج إكس
+API_KEY = 'BA0ipq2dFUZ7JiDTy41fkMdX2QX2'  # API Key الخاص بك
+SECRET_KEY = 'mpawe74izq7jFwcblGqKFXDYQ4uwiQLrLF7w'  # Secret Key الخاص بك
+
+# ربط تليجرام
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    params = {
+        'chat_id': CHAT_ID,
+        'text': message,
+    }
+    requests.get(url, params=params)
+
+# جلب الأسعار من بينج إكس
+def get_bingx_price(symbol):
+    url = f'https://api.bingx.com/api/v1/market/ticker'
+    params = {
+        'symbol': symbol
+    }
+    response = requests.get(url, params=params)
+    data = response.json()
+    return data['data']['lastPrice']
+
+# تحليل المؤشرات (على سبيل المثال: MACD، RSI، إلخ)
+def analyze_indicators(symbol):
+    # هذا هو التحليل البسيط، يمكنك إضافة المزيد من المؤشرات هنا
+    message = f"تحليل المؤشرات للعملة: {symbol}\n"
+    message += "MACD: شراء\n"
+    message += "RSI: بيع\n"
+    message += "الزخم: قوي\n"
+    message += "توصية: لونج"
+    return message
+
+# دالة رئيسية لإرسال التنبيهات
+def main():
+    # حدد العملات التي تريد مراقبتها
+    symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT']
+
+    while True:
+        for symbol in symbols:
+            price = get_bingx_price(symbol)
+            analysis_message = analyze_indicators(symbol)
+            # إرسال التنبيه للتليجرام
+            send_telegram_message(f"{analysis_message}\nالسعر الحالي: {price}\nالوقت: {datetime.datetime.now()}")
+        time.sleep(60)  # الانتظار لمدة دقيقة قبل التحقق مرة أخرى
+
+# تشغيل السكربت
+if __name__ == '__main__':
+    main()
