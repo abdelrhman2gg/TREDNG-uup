@@ -1,58 +1,76 @@
-import time
 import requests
-import json
+import time
+import hmac
+import hashlib
+import base64
+import urllib.parse
 import datetime
 
-# إعدادات تليجرام
-TELEGRAM_TOKEN = '7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik'  # توكن البوت الخاص بك
-CHAT_ID = '5316104346'  # الـ ID الخاص بك في التليجرام
+# Telegram bot data
+bot_token = "7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik"
+chat_id = "5316104346"
 
-# إعدادات بينج إكس
-API_KEY = 'BA0ipq2dFUZ7JiDTy41fkMdX2QX2'  # API Key الخاص بك
-SECRET_KEY = 'mpawe74izq7jFwcblGqKFXDYQ4uwiQLrLF7w'  # Secret Key الخاص بك
+# BingX API data
+api_key = "BA0ipq2dFUZ7JiDTy41fkMdX2QX2 ni7FrXQQ93ZCvo1Hsj7gSYrkrkQk4 hvTGkeeu0ekrrBAZHDmJFNTZPIyA"
+secret_key = "mpawe74izq7jFwcblGqKFXDYQ4uwiQLrLF7w VseJ1qEyVZWLziUuY9HCV6wASr12K8pqlwY bo4RG8OeJKWFndA"
 
-# ربط تليجرام
+# List of trading pairs
+symbols = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT"]
+
+# Function to send a message to Telegram
 def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    params = {
-        'chat_id': CHAT_ID,
-        'text': message,
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message
     }
-    requests.get(url, params=params)
+    try:
+        response = requests.post(url, data=payload)
+        if response.status_code != 200:
+            print("Error sending message:", response.text)
+    except Exception as e:
+        print("Exception:", e)
 
-# جلب الأسعار من بينج إكس
-def get_bingx_price(symbol):
-    url = f'https://api.bingx.com/api/v1/market/ticker'
+# Function to get the current price from BingX
+def get_price(symbol):
+    url = "https://open-api.bingx.com/openApi/spot/v1/ticker/price"
     params = {
-        'symbol': symbol
+        "symbol": symbol
     }
-    response = requests.get(url, params=params)
-    data = response.json()
-    return data['data']['lastPrice']
+    headers = {
+        "X-BX-APIKEY": api_key
+    }
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        data = response.json()
+        return float(data['data']['price'])
+    except Exception as e:
+        print("Exception getting price:", e)
+        return None
 
-# تحليل المؤشرات (على سبيل المثال: MACD، RSI، إلخ)
-def analyze_indicators(symbol):
-    # هذا هو التحليل البسيط، يمكنك إضافة المزيد من المؤشرات هنا
-    message = f"تحليل المؤشرات للعملة: {symbol}\n"
-    message += "MACD: شراء\n"
-    message += "RSI: بيع\n"
-    message += "الزخم: قوي\n"
-    message += "توصية: لونج"
-    return message
+# Function to predict the next 6 candles (simple logic, can be improved)
+def predict_next_6_candles(current_price):
+    prediction = []
+    for i in range(6):
+        delta = 0.1 * (i+1)  # Simple random delta for demo
+        prediction.append(round(current_price + delta, 2))
+    return prediction
 
-# دالة رئيسية لإرسال التنبيهات
+# Main loop
 def main():
-    # حدد العملات التي تريد مراقبتها
-    symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT']
-
     while True:
+        final_message = ""
         for symbol in symbols:
-            price = get_bingx_price(symbol)
-            analysis_message = analyze_indicators(symbol)
-            # إرسال التنبيه للتليجرام
-            send_telegram_message(f"{analysis_message}\nالسعر الحالي: {price}\nالوقت: {datetime.datetime.now()}")
-        time.sleep(60)  # الانتظار لمدة دقيقة قبل التحقق مرة أخرى
+            price = get_price(symbol)
+            if price:
+                prediction = predict_next_6_candles(price)
+                final_message += f"\n\n** {symbol} **\nCurrent Price: {price}\nNext 6 Candles Prediction: {prediction}\n"
+        
+        final_message += f"\n\nUpdate Time: {datetime.datetime.now().strftime('%H:%M:%S')}"
+        send_telegram_message(final_message)
 
-# تشغيل السكربت
-if __name__ == '__main__':
+        print("Message sent to Telegram.")
+        time.sleep(60)  # Wait 60 seconds before the next update
+
+if __name__ == "__main__":
     main()
