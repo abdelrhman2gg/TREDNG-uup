@@ -1,72 +1,117 @@
-import os
 import requests
 import time
 import datetime
 
-# قراءة بيانات البيئة
-api_key = os.getenv("BA0ipq2dFUZ7JiDTy41fkMdX2QX2 ni7FrXQQ93ZCvo1Hsj7gSYrkrkQk4 hvTGkeeu0ekrrBAZHDmJFNTZPIyA")
-secret_key = os.getenv("mpawe74izq7jFwcblGqKFXDYQ4uwiQLrLF7w VseJ1qEyVZWLziUuY9HCV6wASr12K8pqlwY bo4RG8OeJKWFndA")
-bot_token = os.getenv("7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik")
-chat_id = os.getenv("5316104346")
+# ██████████████████████████████████████████████████████████████████████████
+#                               إعدادات التطبيق
+# ██████████████████████████████████████████████████████████████████████████
 
-# العملات اللي هنشتغل عليها
+# ━━━ بيانات التليجرام ━━━
+bot_token = "7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik"
+chat_id = "5316104346"
+
+# ━━━ بيانات BingX API ━━━
+api_key = "BA0ipq2dFUZ7JiDTy41fkMdX2QX2ni7FrXQQ93ZCvo1Hsj7gSYrkrkQk4hvTGkeeu0ekrrBAZHDmJFNTZPIyA"
+secret_key = "mpawe74izq7jFwcblGqKFXDYQ4uwiQLrLF7wVseJ1qEyVZWLziUuY9HCV6wASr12K8pqlwYbo4RG8OeJKWFndA"
+
+# ━━━ العملات المُتداولة ━━━
 symbols = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT"]
 
-# دالة إرسال رسالة للتليجرام
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message
-    }
-    try:
-        response = requests.post(url, data=payload)
-        if response.status_code != 200:
-            print("Error sending message:", response.text)
-    except Exception as e:
-        print("Exception sending message:", e)
+# ██████████████████████████████████████████████████████████████████████████
+#                                 الدوال الأساسية
+# ██████████████████████████████████████████████████████████████████████████
 
-# دالة قراءة السعر من BingX
-def get_price(symbol):
-    url = "https://open-api.bingx.com/openApi/spot/v1/ticker/price"
-    params = {
-        "symbol": symbol
-    }
-    headers = {
-        "X-BX-APIKEY": api_key
-    }
+def send_telegram_message(message: str) -> None:
+    """إرسال رسالة إلى بوت التليجرام"""
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
+    
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            print(f"❌ فشل إرسال الرسالة | كود الخطأ: {response.status_code}")
+    except Exception as e:
+        print(f"❌ خطأ في الإرسال: {str(e)}")
+
+def get_current_price(symbol: str) -> float | None:
+    """جلب السعر الحالي للعملة من منصة BingX"""
+    url = "https://open-api.bingx.com/openApi/swap/v2/quote/price"
+    params = {"symbol": symbol}
+    headers = {"X-BX-APIKEY": api_key}
+    
     try:
         response = requests.get(url, params=params, headers=headers)
         data = response.json()
-        return float(data['data']['price'])
+        
+        if data.get('data') and 'price' in data['data']:
+            return float(data['data']['price'])
+        else:
+            print(f"⚠️ بيانات غير متوقعة لـ {symbol}: {data}")
+            return None
+            
     except Exception as e:
-        print("Exception getting price:", e)
+        print(f"❌ خطأ في جلب السعر لـ {symbol}: {str(e)}")
         return None
 
-# دالة توقع ٦ شمعات قادمة
-def predict_next_6_candles(current_price):
-    prediction = []
-    for i in range(6):
-        delta = 0.1 * (i + 1)  # زياده وهمية بسيطة للشرح
-        prediction.append(round(current_price + delta, 2))
-    return prediction
+def calculate_indicators(price: float, history: list) -> tuple:
+    """حساب المؤشرات الفنية"""
+    # توقع الأسعار للـ6 شمعات القادمة
+    predictions = [round(price + (0.1 * (i+1)), 2) for i in range(6)]
+    
+    # حساب المتوسط المتحرك البسيط (5 فترات)
+    updated_history = history + [price]
+    if len(updated_history) > 5:
+        updated_history.pop(0)
+        
+    moving_avg = round(sum(updated_history)/len(updated_history), 2)
+    
+    return predictions, moving_avg
 
-# الحلقة الأساسية
+# ██████████████████████████████████████████████████████████████████████████
+#                                 حلقة التشغيل الرئيسية
+# ██████████████████████████████████████████████████████████████████████████
+
 def main():
+    price_history = {symbol: [] for symbol in symbols}
+    
     while True:
+        print("\n" + "="*40 + " بدء دورة جديدة " + "="*40)
+        
         for symbol in symbols:
-            price = get_price(symbol)
-            if price:
-                prediction = predict_next_6_candles(price)
-                message = f"**{symbol}**\n\n" \
-                          f"Current Price: {price}\n\n" \
-                          f"Next 6 Candles Prediction: {prediction}\n\n" \
-                          f"Updated at: {datetime.datetime.now().strftime('%H:%M:%S')}"
+            print(f"\n🔎 معالجة {symbol}...")
+            
+            # ━━━ جلب البيانات ━━━
+            current_price = get_current_price(symbol)
+            
+            if current_price:
+                # ━━━ حساب المؤشرات ━━━
+                predictions, ma = calculate_indicators(
+                    current_price,
+                    price_history[symbol]
+                )
+                
+                # ━━━ إعداد الرسالة ━━━
+                message = (
+                    f"📊 **{symbol}**\n"
+                    f"▸ السعر الحالي: {current_price}\n"
+                    f"▸ توقع الشمعات القادمة: {predictions}\n"
+                    f"▸ المتوسط المتحرك (5): {ma}\n"
+                    f"⏱ وقت التحديث: {datetime.datetime.now().strftime('%H:%M:%S')}"
+                )
+                
+                # ━━━ إرسال التنبيه ━━━
                 send_telegram_message(message)
-                print(f"Sent update for {symbol}")
-            time.sleep(2)  # 2 ثواني بين كل عملة عشان نرتاح شوية
-
-        time.sleep(120)  # كل دقيقتين يعمل التحديث
+                print("✅ تم إرسال التنبيه بنجاح")
+                
+                # تحديث التاريخ
+                price_history[symbol] = price_history[symbol][-4:] + [current_price]
+                
+            else:
+                print(f"⚠️ فشل في معالجة {symbol}")
+        
+        # ━━━ فاصل بين الدورات ━━━
+        print("\n" + "="*35 + " انتظار 60 ثانية " + "="*35)
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()
