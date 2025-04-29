@@ -1,58 +1,95 @@
-import time
 import requests
-import json
+import time
 import datetime
 
-# إعدادات تليجرام
-TELEGRAM_TOKEN = '7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik'  # توكن البوت الخاص بك
-CHAT_ID = '5316104346'  # الـ ID الخاص بك في التليجرام
+# بيانات التليجرام
+bot_token = "7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik"
+chat_id = "5316104346"
 
-# إعدادات بينج إكس
-API_KEY = 'BA0ipq2dFUZ7JiDTy41fkMdX2QX2'  # API Key الخاص بك
-SECRET_KEY = 'mpawe74izq7jFwcblGqKFXDYQ4uwiQLrLF7w'  # Secret Key الخاص بك
+# بيانات BingX API
+api_key = "BA0ipq2dFUZ7JiDTy41fkMdX2QX2 ni7FrXQQ93ZCvo1Hsj7gSYrkrkQk4 hvTGkeeu0ekrrBAZHDmJFNTZPIyA"
+secret_key = "mpawe74izq7jFwcblGqKFXDYQ4uwiQLrLF7w VseJ1qEyVZWLziUuY9HCV6wASr12K8pqlwY bo4RG8OeJKWFndA"
 
-# ربط تليجرام
+# العملات اللي هنشتغل عليها
+symbols = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "BNB-USDT"]
+
+# دالة إرسال رسالة للتليجرام
 def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    params = {
-        'chat_id': CHAT_ID,
-        'text': message,
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message
     }
-    requests.get(url, params=params)
+    try:
+        response = requests.post(url, data=payload)
+        if response.status_code != 200:
+            print("Error sending message:", response.text)
+    except Exception as e:
+        print("Exception:", e)
 
-# جلب الأسعار من بينج إكس
-def get_bingx_price(symbol):
-    url = f'https://api.bingx.com/api/v1/market/ticker'
+# دالة قراءة السعر من BingX
+def get_price(symbol):
+    url = "https://open-api.bingx.com/openApi/spot/v1/ticker/price"
     params = {
-        'symbol': symbol
+        "symbol": symbol
     }
-    response = requests.get(url, params=params)
-    data = response.json()
-    return data['data']['lastPrice']
+    headers = {
+        "X-BX-APIKEY": api_key
+    }
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        data = response.json()
+        return float(data['data']['price'])
+    except Exception as e:
+        print("Exception getting price:", e)
+        return None
 
-# تحليل المؤشرات (على سبيل المثال: MACD، RSI، إلخ)
-def analyze_indicators(symbol):
-    # هذا هو التحليل البسيط، يمكنك إضافة المزيد من المؤشرات هنا
-    message = f"تحليل المؤشرات للعملة: {symbol}\n"
-    message += "MACD: شراء\n"
-    message += "RSI: بيع\n"
-    message += "الزخم: قوي\n"
-    message += "توصية: لونج"
-    return message
+# دالة التوقع البسيطة (مكانها نطوره بعدين بمؤشرات وتقنيات)
+def predict_next_6_candles(current_price):
+    prediction = []
+    for i in range(6):
+        delta = 0.1 * (i+1)  # عشوائي بسيط للشرح
+        prediction.append(round(current_price + delta, 2))
+    return prediction
 
-# دالة رئيسية لإرسال التنبيهات
+# دالة حساب التغير في السعر خلال آخر 5 دقائق
+def calculate_price_change(initial_price, current_price):
+    change = ((current_price - initial_price) / initial_price) * 100
+    return round(change, 2)
+
+# حلقة التشغيل الأساسية
 def main():
-    # حدد العملات التي تريد مراقبتها
-    symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT']
-
+    previous_prices = {symbol: None for symbol in symbols}  # لحفظ السعر السابق لكل عملة
     while True:
+        final_message = ""
         for symbol in symbols:
-            price = get_bingx_price(symbol)
-            analysis_message = analyze_indicators(symbol)
-            # إرسال التنبيه للتليجرام
-            send_telegram_message(f"{analysis_message}\nالسعر الحالي: {price}\nالوقت: {datetime.datetime.now()}")
-        time.sleep(60)  # الانتظار لمدة دقيقة قبل التحقق مرة أخرى
+            price = get_price(symbol)
+            if price:
+                # نحدد السعر السابق
+                initial_price = previous_prices[symbol] if previous_prices[symbol] else price
+                price_change = calculate_price_change(initial_price, price)
+                
+                # توقع 6 شمعات قادمة
+                prediction = predict_next_6_candles(price)
+                
+                # تحديد إذا كان التغير السعر لصالح لونج أو شورت
+                trend = "لونج 🚀" if price_change > 0 else "شورت 📉"
+                
+                # تحديث الرسالة لكل عملة
+                final_message = f"🔵 عملة: {symbol}\n"
+                final_message += f"السعر الحالي: {price}\n"
+                final_message += f"التغير آخر 5 دقائق: {price_change}% ({trend})\n"
+                final_message += f"توقع ٦ شمعات قادمة: {prediction}\n"
+                final_message += f"⏰ وقت التحديث: {datetime.datetime.now().strftime('%H:%M:%S')}\n"
 
-# تشغيل السكربت
-if __name__ == '__main__':
+                # إرسال رسالة لكل عملة
+                send_telegram_message(final_message)
+                print(f"تم إرسال رسالة: {symbol}")
+
+                # تحديث السعر السابق للعملة
+                previous_prices[symbol] = price
+
+        time.sleep(120)  # كل 2 دقيقة
+
+if __name__ == "__main__":
     main()
