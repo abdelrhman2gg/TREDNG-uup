@@ -1,0 +1,429 @@
+# -*- coding: utf-8 -*-
+"""
+بوت تحليل فني احترافي للعملات الرقمية (عقود آجلة) على BingX V5.1 (مُعدَّل)
+- يرسل تقارير دورية إلى Telegram (رسالة منفصلة لكل عملة).
+- يحلل بيانات الشموع التاريخية (5 دقائق).
+- يحسب مؤشرات متعددة (RSI, MACD, BBands, Stoch, SMAs, Ichimoku, ADX, ATR, CCI, PSAR, VWAP, OBV, CMF, MOM, ROC, SuperTrend,
+  Fibonacci) وحجم التداول يدوياً.
+- يوفر خيارات تنسيق متعددة للتقارير مع شروحات مبسطة.
+- يقدم درجة تأكيد للإشارة بناءً على توافق المؤشرات الرئيسية.
+- يوضح إشارات الشراء (Long) والبيع (Short).
+- تصميم رسالة محسن مع رموز تعبيرية وتنسيق واضح.
+- يتوقع حركة السعر لـ 6 شمعات قادمة (افتراضيًا).
+- يحدد أفضل 5 عملات للتداول.
+- يقدم تقييمًا لنسبة دقة قراءة المؤشرات (تقريبي).
+"""
+import os
+import time
+import requests
+import datetime
+import math
+import traceback
+from typing import Dict, List, Optional, Tuple, Any
+
+# ==============================================================================
+# ////////////////           إعدادات المستخدم الأساسية           ////////////////
+# ==============================================================================
+
+# --- إعدادات Telegram ---
+BOT_TOKEN: str = "7842436262:AAHPMbzYO-Kzrl5k33Gdw4yc_6i2qcAnnik"  # <<-- ضع التوكن الخاص بك هنا
+CHAT_ID: str = "5316104346"  # <<-- ضع معرف الدردشة الخاص بك هنا
+
+# --- إعدادات BingX API ---
+API_KEY: str = "BA0ipq2dFUZ7JiDTy41fkMdX2QX2ni7FrXQQ93ZCvo1Hsj7gSYrkrkQk4hvTGkeeu0ekrrBAZHDmJFNTZPIyA"  # <<-- ضع مفتاح API الخاص بك هنا
+
+# --- إعدادات التحليل والبيانات ---
+# تأكد من أن الرموز صحيحة للعقود الآجلة USDT-M على BingX
+SYMBOLS: List[str] = [
+    "BTC-USDT", "ETH-USDT", "BNB-USDT", "SOL-USDT",
+    "XRP-USDT", "TAO-USDT",  # <<-- تم التغيير إلى TAO (تحقق من وجوده)
+    "DOGE-USDT", "ADA-USDT"
+]
+KLINE_INTERVAL: str = "5m"  # **تم التعديل**: الفاصل الزمني 5 دقائق
+KLINE_LIMIT: int = 400  # **تم التعديل**: زيادة الحد لتغطية فترة أطول (400 شمعة)
+UPDATE_INTERVAL_SECONDS: int = 150  # **تم التعديل**: فاصل زمني للتحليل 2:30 دقيقة (150 ثانية)
+DELAY_BETWEEN_SYMBOLS: float = 0.1 # تقليل التأخير لتحليل أسرع
+DELAY_AFTER_TELEGRAM_SEND: float = 0.5 # تقليل التأخير
+
+NUM_PREDICTED_CANDLES: int = 6  # عدد الشمعات المتوقعة
+LEVERAGE: int = 20  # الرافعة المالية (20%)
+NUM_TOP_SYMBOLS: int = 5 # عدد العملات الأعلى تقييما
+
+# --- إعدادات التقرير ---
+REPORT_FORMAT_STYLE: str = "simple"  # **تم التعديل**: تنسيق تقرير مبسط
+# الخيارات: "simple", "detailed", "compact", "signal_only"
+
+# --- إعدادات المؤشرات الفنية ---
+# **تم التعديل**: الاحتفاظ بالفترات الافتراضية أو إضافة فترات جديدة
+RSI_PERIOD: int = 14
+RSI_OVERBOUGHT: int = 70
+RSI_OVERSOLD: int = 30
+MACD_FAST: int = 12
+MACD_SLOW: int = 26
+MACD_SIGNAL: int = 9
+BBANDS_PERIOD: int = 20
+BBANDS_STDDEV: float = 2.0
+STOCH_K: int = 14
+STOCH_D: int = 3
+STOCH_SMOOTH_K: int = 3
+SMA_PERIODS: List[int] = [5, 10, 20] # فترات المتوسطات المتحركة
+ICHIMOKU_TENKAN: int = 9
+ICHIMOKU_KIJUN: int = 26
+ICHIMOKU_SENKOU_B: int = 52
+FIBONACCI_PERIOD: int = 100
+ADX_PERIOD: int = 14
+ATR_PERIOD: int = 14
+VOLUME_SMA_PERIOD: int = 20
+CCI_PERIOD: int = 20
+PSAR_STEP: float = 0.02
+PSAR_MAX_STEP: float = 0.2
+VWAP_PERIOD: int = 20  # فترة شائعة لـ VWAP على الأطر القصيرة
+MOM_PERIOD: int = 10 # فترة مؤشر العزم
+ROC_PERIOD: int = 12 # فترة معدل التغير
+OBV_PERIOD: int = 20 # فترة OBV
+CMF_PERIOD: int = 21 # فترة CMF
+SUPER_TREND_PERIOD: int = 10
+SUPER_TREND_MULTIPLIER: float = 3
+
+
+# --- إعدادات درجة التأكيد ---
+CONFIRMATION_INDICATORS = ['RSI_Trend', 'MACD_Hist', 'ADX_Trend', 'SMA_Align', 'CCI_Trend', 'PSAR_Trend', 'Stoch_Trend','OBV_Trend','Trend_SuperTrend'] # تم إضافة PSAR
+
+# --- نقطة نهاية API ---
+BINGX_API_BASE_URL: str = "https://open-api.bingx.com"
+KLINE_ENDPOINT: str = "/openApi/swap/v3/quote/klines"
+
+# ==============================================================================
+# ////////////////          وظائف مساعدة وتنسيق الأرقام         ////////////////
+# ==============================================================================
+def safe_format_number(val: Optional[float], precision: int = 4, use_comma: bool = True) -> str:
+    """ينسق الأرقام بأمان مع الفواصل والدقة المطلوبة."""
+    if val is None:
+        return "--"
+    try:
+        abs_val = abs(val)
+        if abs_val == 0:
+            current_precision = 2
+        elif abs_val < 0.0001:
+            current_precision = 8
+        elif abs_val < 0.01:
+            current_precision = 6
+        elif abs_val < 1:
+            current_precision = 5
+        elif abs_val < 1000 and precision >= 4:
+            current_precision = 4
+        elif abs_val < 100000:
+            current_precision = 2
+        else:
+            current_precision = 0
+        format_string = f"{{:,.{current_precision}f}}" if use_comma else f"{{:.{current_precision}f}}"
+        return format_string.format(val)
+    except (ValueError, TypeError):
+        return "--"
+
+# ==============================================================================
+# ////////////////          وظائف جلب البيانات من BingX          ////////////////
+# ==============================================================================
+def fetch_historical_klines(symbol: str, interval: str = KLINE_INTERVAL,
+                            limit: int = KLINE_LIMIT) -> Optional[
+    Tuple[List[float], List[float], List[float], List[float], List[float]]]:
+    url = f"{BINGX_API_BASE_URL}{KLINE_ENDPOINT}"
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    headers = {"X-BX-APIKEY": API_KEY}
+    print(f"  [*] Fetching {limit} klines ({interval}) for {symbol} from {KLINE_ENDPOINT}...")
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=30)
+        print(f"      HTTP Status Code: {response.status_code}")
+        if response.status_code != 200:
+            print(f"[-] API Error ({response.status_code}) for {symbol}. URL: {url}")
+            try:
+                print(f"[-] Response Body: {response.text}")
+            except Exception:
+                print("[-] Response Body: (Could not decode)")
+            return None
+        response.raise_for_status()
+        try:
+            data = response.json()
+        except requests.exceptions.JSONDecodeError as json_err:
+            print(f"[-] Failed JSON decode for {symbol}. Error: {json_err}")
+            print(f"[-] Response Text: {response.text[:500]}...")
+            return None
+        if data and isinstance(data, dict) and data.get('code') == 0:
+            if 'data' in data and isinstance(data['data'], list):
+                klines_list_of_dicts = data['data']
+                if not klines_list_of_dicts:
+                    print(f" [!] API OK but kline list empty for {symbol}.");
+                    return None
+                o, h, l, c, v = [], [], [], [], []
+                malformed = 0
+                for i, k_dict in enumerate(klines_list_of_dicts):
+                    if isinstance(k_dict, dict) and all(
+                            k in k_dict for k in ['open', 'high', 'low', 'close', 'volume']):
+                        try:
+                            o.append(float(k_dict['open']));
+                            h.append(float(k_dict['high']))
+                            l.append(float(k_dict['low']));
+                            c.append(float(k_dict['close']))
+                            v.append(float(k_dict['volume']))
+                        except (ValueError, TypeError) as e:
+                            malformed += 1;
+                            print(f" [!] Err converting kline #{i}: {k_dict}, E:{e}")
+                    else:
+                        malformed += 1;
+                        print(f" [!] Bad kline format #{i}: {k_dict}")
+                if malformed > 0:
+                    print(f"  [!] Found {malformed} malformed klines for {symbol}.")
+                    if len(c) < len(klines_list_of_dicts) * 0.8:
+                        print(" [!] High malformed rate. Aborting.");
+                        return None
+                    else:
+                        print("  [!] Continuing despite malformed klines.")
+                if c:
+                    print(f"  [+] OK: Fetched & Parsed {len(c)} OHLCV points for {symbol}.")
+                    if len(c) < limit * 0.9:
+                        print(f"  [!] Warn: Received {len(c)}/{limit} klines.")
+                    return o[::-1], h[::-1], l[::-1], c[::-1], v[::-1]  # Reverse all
+                else:
+                    print(f"  [!] No valid close prices parsed for {symbol}.");
+                    return None
+            else:
+                print(f"[-] API OK (code 0) but 'data' key missing/not list for {symbol}. R: {data}");
+                return None
+        else:
+            code = data.get('code', 'N/A') if isinstance(data, dict) else 'N/A'
+            msg = data.get('msg', 'No msg') if isinstance(data, dict) else f"Invalid: {str(data)[:200]}"
+            print(f"[-] API Error for {symbol}. Code: {code}, Msg: {msg}");
+            return None
+    except requests.exceptions.Timeout:
+        print(f"[-] Timeout fetching klines for {symbol}.");
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Network Error fetching klines for {symbol}: {e}");
+        return None
+    except Exception as e:
+        print(f"[-] Unexpected Error fetch/process for {symbol}: {e}");
+        print(traceback.format_exc());
+        return None
+
+# ==============================================================================
+# ////////////////        فئة حساب المؤشرات وتحليلها يدويًا        ////////////////
+# ==============================================================================
+class ManualTradingAnalyzer:
+    """ يحسب المؤشرات الفنية وتفسرها وتولد إشارات بسيطة بدون مكتبات خارجية. """
+
+    # --- دوال مساعدة (SMA, EMA, StdDev, TR, Wilder Smooth) ---
+    @staticmethod
+    def _calculate_sma(data: List[float], period: int) -> Optional[float]:
+        if not data or len(data) < period:
+            return None
+        try:
+            return sum(data[-period:]) / period
+        except Exception as e:
+            print(f"Err SMA ({period}): {e}");
+            return None
+
+    @staticmethod
+    def _calculate_ema(data: List[float], period: int) -> Optional[float]:
+        if not data or len(data) < period:
+            return None
+        try:
+            sma = sum(data[:period]) / period
+            ema_values = [sma]
+            multiplier = 2 / (period + 1)
+            for price in data[period:]:
+                ema = (price * multiplier) + (ema_values[-1] * (1 - multiplier))
+                ema_values.append(ema)
+            return ema_values[-1] if ema_values else None
+        except Exception as e:
+            print(f"Err EMA ({period}): {e}");
+            return None
+
+    @staticmethod
+    def _calculate_std_dev(data: List[float], period: int) -> Optional[float]:
+        if not data or len(data) < period:
+            return None
+        subset = data[-period:]
+        if len(subset) < 2:
+            return 0.0
+        try:
+            mean = sum(subset) / len(subset)
+            variance = sum([(price - mean) ** 2 for price in subset]) / len(subset)
+            return math.sqrt(variance) if variance >= 0 else 0.0
+        except Exception as e:
+            print(f"Err StdDev ({period}): {e}");
+            return None
+
+    @staticmethod
+    def _calculate_tr(high_prices: List[float], low_prices: List[float], close_prices: List[float]) -> List[float]:
+        tr_list = []
+        if not (high_prices and low_prices and close_prices and len(close_prices) > 1):
+            return tr_list
+        try:
+            tr_list.append(high_prices[0] - low_prices[0])
+            for i in range(1, len(close_prices)):
+                tr = max(high_prices[i] - low_prices[i],
+                         abs(high_prices[i] - close_prices[i - 1]),
+                         abs(low_prices[i] - close_prices[i - 1]))
+                tr_list.append(tr)
+        except Exception as e:
+            print(f"Err TR: {e}")
+        return tr_list
+
+    @staticmethod
+    def _calculate_wilder_smooth(data: List[float], period: int) -> Optional[List[float]]:
+        if not data or len(data) < period:
+            return None
+        smoothed_values = []
+        try:
+            sma = sum(data[:period]) / period
+            smoothed_values.append(sma)
+            for i in range(period, len(data)):
+                new_val = (smoothed_values[-1] * (period - 1) + data[i]) / period
+                smoothed_values.append(new_val)
+        except Exception as e:
+            print(f"Err Wilder ({period}): {e}");
+            return None
+        return smoothed_values
+    
+    @staticmethod
+    def _calculate_obv(close_prices: List[float], volumes: List[float]) -> Optional[List[float]]:
+        """ Calculates On Balance Volume (OBV) """
+        if not (close_prices and volumes and len(close_prices) == len(volumes) and len(close_prices) > 1):
+            return None
+        try:
+            obv_values = [0]  # Start with a zero OBV
+            for i in range(1, len(close_prices)):
+                if close_prices[i] > close_prices[i-1]:  # Uptick
+                    obv_values.append(obv_values[-1] + volumes[i])
+                elif close_prices[i] < close_prices[i-1]:  # Downtick
+                    obv_values.append(obv_values[-1] - volumes[i])
+                else:
+                    obv_values.append(obv_values[-1])  # No change
+            return obv_values
+        except Exception as e:
+            print(f"Err OBV: {e}")
+            return None
+
+    # --- دوال حساب المؤشرات الرئيسية ---
+    def calculate_rsi(self, prices: List[float], period: int = RSI_PERIOD) -> Optional[float]:
+        if not prices or len(prices) < period + 1:
+            return None
+        try:
+            changes = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
+            relevant_changes = changes[-period:]
+            gains = [c for c in relevant_changes if c >= 0]
+            losses = [abs(c) for c in relevant_changes if c < 0]
+            avg_gain = sum(gains) / period if gains else 0.0
+            avg_loss = sum(losses) / period if losses else 0.0
+            if avg_loss == 0:
+                return 100.0
+            rs = avg_gain / avg_loss
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+            return round(rsi, 2)
+        except Exception as e:
+            print(f"Err RSI ({period}): {e}");
+            return None
+
+    def calculate_macd(self, prices: List[float], fast: int = MACD_FAST, slow: int = MACD_SLOW,
+                      signal: int = MACD_SIGNAL) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        if not prices or len(prices) < slow + signal - 1:
+            return None, None, None
+        try:
+            ema_fast = self._calculate_ema(prices, fast)
+            ema_slow = self._calculate_ema(prices, slow)
+            if ema_fast is None or ema_slow is None:
+                return None, None, None
+            macd_line = ema_fast - ema_slow
+            macd_values_for_signal = []
+            temp_ema_fast_hist, temp_ema_slow_hist = [], []
+            if len(prices) >= fast:
+                sma_f = sum(prices[:fast]) / fast;
+                temp_ema_fast_hist.append(sma_f)
+                mult_f = 2 / (fast + 1);
+                [temp_ema_fast_hist.append((prices[i] * mult_f) + (temp_ema_fast_hist[-1] * (1 - mult_f))) for i in
+                 range(fast, len(prices))]
+            if len(prices) >= slow:
+                sma_s = sum(prices[:slow]) / slow;
+                temp_ema_slow_hist.append(sma_s)
+                mult_s = 2 / (slow + 1);
+                [temp_ema_slow_hist.append((prices[i] * mult_s) + (temp_ema_slow_hist[-1] * (1 - mult_s))) for i in
+                 range(slow, len(prices))]
+            if len(temp_ema_fast_hist) > (slow - fast) and len(temp_ema_slow_hist) > 0:
+                common_len = min(len(temp_ema_slow_hist), len(temp_ema_fast_hist) - (slow - fast))
+                start_idx_fast = slow - fast
+                for i in range(common_len):
+                    macd_values_for_signal.append(
+                        temp_ema_fast_hist[i + start_idx_fast] - temp_ema_slow_hist[i])
+            signal_line = self._calculate_ema(macd_values_for_signal, signal)
+            macd_hist = (macd_line - signal_line) if signal_line is not None else None
+            return round(macd_line, 5), round(signal_line, 5) if signal_line else None, round(macd_hist,
+                                                                                              5) if macd_hist else None
+        except Exception as e:
+            print(f"Err MACD: {e}");
+            return None, None, None
+
+    def calculate_bollinger_bands(self, prices: List[float], period: int = BBANDS_PERIOD,
+                                  std_dev_multiplier: float = BBANDS_STDDEV) -> Tuple[
+        Optional[float], Optional[float], Optional[float]]:
+        if not prices or len(prices) < period:
+            return None, None, None
+        try:
+            middle_band = self._calculate_sma(prices, period)
+            if middle_band is None:
+                return None, None, None
+            std_dev = self._calculate_std_dev(prices, period)  # Use full list for std dev
+            if std_dev is None:
+                return None, middle_band, None
+            upper_band = middle_band + (std_dev * std_dev_multiplier)
+            lower_band = middle_band - (std_dev * std_dev_multiplier)
+            return round(lower_band, 4), round(middle_band, 4), round(upper_band, 4)
+        except Exception as e:
+            print(f"Err BBands ({period}): {e}");
+            return None, None, None
+
+    def calculate_stochastic(self, high_prices: List[float], low_prices: List[float], close_prices: List[float],
+                             k_period: int = STOCH_K, d_period: int = STOCH_D,
+                             smooth_k_period: int = STOCH_SMOOTH_K) -> Tuple[Optional[float], Optional[float]]:
+        required_length = k_period + smooth_k_period - 1 + d_period - 1
+        if not (high_prices and low_prices and close_prices and len(close_prices) >= required_length):
+            return None, None
+        try:
+            k_values_raw = []
+            for i in range(k_period - 1, len(close_prices)):
+                subset_h = high_prices[i - k_period + 1: i + 1];
+                subset_l = low_prices[i - k_period + 1: i + 1]
+                highest_high = max(subset_h);
+                lowest_low = min(subset_l);
+                current_close = close_prices[i]
+                if highest_high == lowest_low:
+                    k = 100.0 if current_close >= lowest_low else 0.0
+                else:
+                    k = 100.0 * (current_close - lowest_low) / (highest_high - lowest_low)
+                k_values_raw.append(k)
+            if not k_values_raw:
+                return None, None
+            k_values_smoothed = []
+            if len(k_values_raw) >= smooth_k_period:
+                for i in range(smooth_k_period - 1, len(k_values_raw)):
+                    k_values_smoothed.append(
+                        sum(k_values_raw[i - smooth_k_period + 1:i + 1]) / smooth_k_period)
+            else:
+                return None, None
+            if not k_values_smoothed:
+                return None, None
+            d_values = []
+            if len(k_values_smoothed) >= d_period:
+                d_values = [sum(k_values_smoothed[i - d_period + 1:i + 1]) / d_period for i in
+                            range(d_period - 1, len(k_values_smoothed))]
+            else:
+                return None, None
+            if not d_values:
+                return None, None
+            return round(k_values_smoothed[-1], 2), round(d_values[-1], 2)
+        except Exception as e:
+            print(f"Err Stoch: {e}");
+            return None, None
+
+    def calculate_ichimoku(self, high_prices: List[float], low_prices: List[float], close_prices: List[float],
+                           tenkan_p: int = ICHIMOKU_TENKAN, kijun_p: int = ICHIMOKU_KIJUN,
+                           senkou_b_p: int = ICHIMOKU_SENKOU_B) -> Tuple[Optional[flo
